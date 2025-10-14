@@ -1,7 +1,7 @@
 from STTMethod import PropagateSatellite
 
 def standard_case():
-    propagator = PropagateSatellite(180, 10, 3, 3, 3, 910, 1, 2, 3, 910, True)
+    propagator = PropagateSatellite(180, 10, 3, 3, 3, 910, 1, 2, 3, 960, True)
     propagator.do_calc()
 
 def short_arc_case():
@@ -24,14 +24,14 @@ if __name__ == "__main__":
     print("Running standard case....")
     standard_case()
 
-    print("Running short arc case...")
-    short_arc_case()
+    # print("Running short arc case...")
+    # short_arc_case()
 
-    print("Running sparse case...")
-    sparse_case()
+    # print("Running sparse case...")
+    # sparse_case()
 
-    print("Running early impulse case...")
-    early_impulse()
+    # print("Running early impulse case...")
+    # early_impulse()
 
-    print("Running late impulse case...")
-    late_impulse()
+    # print("Running late impulse case...")
+    # late_impulse()
