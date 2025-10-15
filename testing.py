@@ -20,9 +20,16 @@ def early_impulse():
     propagator = PropagateSatellite(180, 10, 1, 2, 4, 30, 1, 2, 3, 30, True)
     propagator.do_calc()
 
+def no_manoeuvre():
+    propagator = PropagateSatellite(180, 10, 1, 2, 4, 30, 0, 0, 0, 0, True)
+    propagator.do_calc()
+
 if __name__ == "__main__":
-    print("Running standard case....")
-    standard_case()
+    print("Running no manoeuvre...")
+    no_manoeuvre()
+    
+    #print("Running standard case....")
+    #standard_case()
 
     # print("Running short arc case...")
     # short_arc_case()
