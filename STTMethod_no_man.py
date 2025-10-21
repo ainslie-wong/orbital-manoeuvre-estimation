@@ -188,6 +188,7 @@ class PropagateSatellite2():
 
     def calculate_U_and_Q(self, x_target, x_observer, measurement_model, epsilon = 1e-4):
         U = np.zeros((self.MEASUREMENT_DIM, self.STATE_DIM))
+        Q = np.zeros((self.MEASUREMENT_DIM, 6, 6))
 
         for i in range(6):  # Perturb each state component
             dx = np.zeros(6)
@@ -198,7 +199,18 @@ class PropagateSatellite2():
 
             U[:, i] = (h_plus - h_minus) / (2 * epsilon)
 
-        return U
+            for j in range(6):
+                dxj = np.zeros(6)
+                dxj[j] = epsilon
+
+                h_pp = measurement_model(x_target + dx + dxj, x_observer)
+                h_pm = measurement_model(x_target + dx - dxj, x_observer)
+                h_mp = measurement_model(x_target - dx + dxj, x_observer)
+                h_mm = measurement_model(x_target - dx - dxj, x_observer)
+
+                Q[:, i, j] = (h_pp - h_pm - h_mp + h_mm) / (4 * epsilon**2)
+
+        return U, Q
 
     def do_calc(self):
         for i in range(self.i_max):
@@ -207,12 +219,12 @@ class PropagateSatellite2():
             for j in range(self.K - 1):
                 self.z_exp[j] = self.transform_state(self.expected_points[j], self.observer[j])
 
-            # Find STT (phi and psi) and measurement Jacobian (U and Q)
+            # Find STM (phi) and measurement Jacobian (U)
             phi = self.compute_stm()
             U = []
 
             for k in range(self.K):
-                U_k, Q_k = self.calculate_U_and_Q(self.target[k], self.observer[k], self.transform_state)
+                U_k = self.calculate_U(self.target[k], self.observer[k], self.transform_state)
                 U.append(U_k)
 
             U = np.array(U)

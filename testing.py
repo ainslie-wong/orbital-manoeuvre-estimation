@@ -1,4 +1,5 @@
 from STTMethod import PropagateSatellite
+from STMMethod import PropagateSatellite2
 
 def standard_case():
     propagator = PropagateSatellite(180, 10, 3, 3, 3, 910, 1, 2, 3, 960, True)
@@ -21,7 +22,7 @@ def early_impulse():
     propagator.do_calc()
 
 def no_manoeuvre():
-    propagator = PropagateSatellite(180, 10, 1, 2, 4, 30, 0, 0, 0, 0, True)
+    propagator = PropagateSatellite2(180, 10, True)
     propagator.do_calc()
 
 if __name__ == "__main__":
