@@ -16,7 +16,7 @@ class PropagateSatellite2():
     PARAM_DIM = 6
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
-    nu = 1e-3   # Convergence limit
+    nu = 1e-5   # Convergence limit
     i_max = 10  # Iteration limis
 
     P_0 = np.diag([10**2, 10**2, 10**2, 1e-3**2, 1e-3**2, 1e-3**2])
@@ -44,6 +44,8 @@ class PropagateSatellite2():
 
         for i in range(self.K - 1):
             self.z_tau[i] = self.transform_state(self.target[i], self.observer[i])
+
+        self.record_to_file("initial", self.z_exp - self.z_tau)
 
         print("I have generated the expected points")
 
@@ -159,6 +161,7 @@ class PropagateSatellite2():
 
 
     def compute_stm(self):
+        #inside a loop to update X_i with each state in expected_points
         y0 = np.hstack((self.X_i, np.eye(self.STATE_DIM).flatten()))
         sol = solve_ivp(self.combined_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK45')
         phi = sol.y[self.STATE_DIM:, :-1].T
@@ -177,16 +180,16 @@ class PropagateSatellite2():
             [t_eval[0], t_eval[-1]],
             np.concatenate([r0, v0]),
             t_eval=t_eval,
-            rtol=1e-8,
-            atol=1e-10,
-            method='DOP853',
+            rtol=1e-6,
+            atol=1e-8,
+            method='RK23',
             dense_output=True
         )
 
         return np.array(sol.y.T)
         
 
-    def calculate_U_and_Q(self, x_target, x_observer, measurement_model, epsilon = 1e-4):
+    def calculate_U(self, x_target, x_observer, measurement_model, epsilon = 1e-4):
         U = np.zeros((self.MEASUREMENT_DIM, self.STATE_DIM))
 
         for i in range(6):  # Perturb each state component
@@ -207,12 +210,12 @@ class PropagateSatellite2():
             for j in range(self.K - 1):
                 self.z_exp[j] = self.transform_state(self.expected_points[j], self.observer[j])
 
-            # Find STT (phi and psi) and measurement Jacobian (U and Q)
+            # Find STM (phi) and measurement Jacobian (U)
             phi = self.compute_stm()
             U = []
 
             for k in range(self.K):
-                U_k, Q_k = self.calculate_U_and_Q(self.target[k], self.observer[k], self.transform_state)
+                U_k = self.calculate_U(self.target[k], self.observer[k], self.transform_state)
                 U.append(U_k)
 
             U = np.array(U)
@@ -228,8 +231,8 @@ class PropagateSatellite2():
 
             # Calculate weight matrix and normalise
             W = np.zeros((self.K * self.MEASUREMENT_DIM, self.K * self.MEASUREMENT_DIM))
-            for j in range(self.K - 1):
-                W[j * 2:j * 2 + 2, j * 2:j * 2 + 2] = np.linalg.pinv(Omega[j, :] @ self.P_i @ Omega[j, :].T + self.R_meas)
+            for i in range(self.K - 1):
+                W[i * 2:i * 2 + 2, i * 2:i * 2 + 2] = np.linalg.pinv(Omega[i, :] @ self.P_i @ Omega[i, :].T + self.R_meas)
             
             W = W / np.linalg.norm(W)
 
@@ -245,7 +248,7 @@ class PropagateSatellite2():
 
             # Record the iteration and difference in current estimated X_0 and actual initial guess
             if self.record:
-                self.results.append([i, self.target[0]- self.X_i])
+                self.results.append([i, delta_X_linear, self.X_0 - self.X_i])
 
             # Convergence check
             if np.linalg.norm(delta_X_linear) <= self.nu:
@@ -254,7 +257,8 @@ class PropagateSatellite2():
                 for j in self.results:
                     print(j)
 
-                print(self.z_exp - self.z_tau) # Expected points - calculated points
+                self.record_to_file("converged", self.z_exp - self.z_tau)
+
                 break
 
     # Tmp function if feeling deluded and need to look at each propagation visually
@@ -265,7 +269,12 @@ class PropagateSatellite2():
         ax = fig.add_subplot(111, projection='3d')
         ax.plot(self.target[:, 0], self.target[:, 1], self.target[:, 2], color="red", label="Actual Orbit")
         ax.plot(initial_guess[:, 0], initial_guess[:, 1], initial_guess[:, 2], color="black", label = "Initial Guess")
-        #ax.plot(self.expected_points[:, 0], self.expected_points[:, 1], self.expected_points[:, 2], color="blue", label = "Converged Guess")
+        ax.plot(self.expected_points[:, 0], self.expected_points[:, 1], self.expected_points[:, 2], color="blue", label = "Converged Guess")
         ax.set_title("Orbital Trajectory with Impulse")
         plt.legend(loc="upper left")
         plt.show()
+
+    def record_to_file(self, filename, data):
+        with open(filename, "w") as file:
+            for line in data:
+                file.write(f"{line}\n")

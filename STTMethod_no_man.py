@@ -7,7 +7,7 @@ from poliastro.bodies import Earth
 from poliastro.twobody import Orbit
 import matplotlib.pyplot as plt
 
-class PropagateSatellite2():
+class PropagateSatellite3():
     # Constants
     mu_e    = 398600.44    # km**3/s**2
     R_e     = 6378.137      # km
@@ -17,7 +17,7 @@ class PropagateSatellite2():
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
     nu = 1e-3   # Convergence limit
-    i_max = 10  # Iteration limis
+    i_max = 10  # Iteration limit
 
     P_0 = np.diag([10**2, 10**2, 10**2, 1e-3**2, 1e-3**2, 1e-3**2])
     sigma_noise = 1e-4 # Noise during simulation point generation
@@ -119,7 +119,7 @@ class PropagateSatellite2():
         return states[:-1]
 
     #y_ref first differential
-    def calc_first_diff(self, x, t):
+    def calc_first_diff(self, x):
         epsilon = 1e-4
         r = x[:3]
         v = x[3:]
@@ -144,27 +144,62 @@ class PropagateSatellite2():
         ])
 
         return A
+    
+    def calc_second_diff(self, x):
+        epsilon = 1e-4
+        H = np.zeros((self.STATE_DIM, self.PARAM_DIM, self.PARAM_DIM))
+
+        for i in range(self.STATE_DIM):
+            for j in range(self.PARAM_DIM):
+                for k in range(self.PARAM_DIM):
+                    dxj = np.zeros(self.PARAM_DIM)
+                    dxk = np.zeros(self.PARAM_DIM)
+                    dxj[j] = epsilon
+                    dxk[k] = epsilon
+
+                    f_pp = self.dynamics(0, x + dxj + dxk)[i]
+                    f_pm = self.dynamics(0, x + dxj - dxk)[i]
+                    f_mp = self.dynamics(0, x - dxj + dxk)[i]
+                    f_mm = self.dynamics(0, x - dxj - dxk)[i]
+
+                    H[i, j, k] = (f_pp - f_pm - f_mp + f_mm) / (4 * epsilon**2)
+        return H
 
     # used to solve for phi when integrating
-    def combined_dynamics(self, t, y):
+    def stt_dynamics(self, t, y):
         x = y[:self.STATE_DIM]
-        phi_flat = y[self.STATE_DIM:]
+        phi_flat = y[self.STATE_DIM:self.STATE_DIM + self.PARAM_DIM**2]
+        psi_flat = y[self.STATE_DIM + self.PARAM_DIM**2:]
+
         phi = phi_flat.reshape((self.STATE_DIM, self.STATE_DIM))
+        psi = psi_flat.reshape((self.STATE_DIM, self.PARAM_DIM, self.PARAM_DIM))
 
         dxdt = self.dynamics(t, x)
-        A = self.calc_first_diff(x, t)
+        A = self.calc_first_diff(x)
+        H = self.calc_second_diff(x)
         dphidt = A @ phi
 
-        return np.hstack((dxdt, dphidt.flatten()))
+        dpsidt = np.zeros((self.STATE_DIM, self.PARAM_DIM, self.PARAM_DIM))
+        for i in range(self.STATE_DIM):
+            for m in range(self.PARAM_DIM):
+                for n_ in range(self.PARAM_DIM):
+                    sum_term = 0.0
+                    for j in range(self.STATE_DIM):
+                        for k in range(self.STATE_DIM):
+                            sum_term += H[i, j, k] * phi[j, m] * phi[k, n_]
+                    dpsidt[i, m, n_] = A[i, :] @ psi[:, m, n_] + sum_term
 
+        return np.hstack((dxdt, dphidt.flatten(), dpsidt.flatten()))
 
-    def compute_stm(self):
-        y0 = np.hstack((self.X_i, np.eye(self.STATE_DIM).flatten()))
-        sol = solve_ivp(self.combined_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK45')
-        phi = sol.y[self.STATE_DIM:, :-1].T
+    def compute_stt(self):
+        y0 = np.hstack((self.X_i, np.eye(self.STATE_DIM).flatten(), np.zeros((self.STATE_DIM, self.PARAM_DIM, self.PARAM_DIM)).flatten()))
+        sol = solve_ivp(self.stt_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK45')
+        phi = sol.y[self.STATE_DIM : self.STATE_DIM + self.PARAM_DIM**2, :-1].T
         phi = phi.reshape((self.K, self.STATE_DIM, self.PARAM_DIM))
-
-        return phi
+        
+        psi = sol.y[self.STATE_DIM + self.PARAM_DIM**2:, :-1].T
+        psi = psi.reshape((self.K, self.STATE_DIM, self.PARAM_DIM, self.PARAM_DIM))
+        return phi, psi
 
     def propagate(self, t_eval, X):
         r0 = X[:3]
@@ -214,59 +249,84 @@ class PropagateSatellite2():
 
     def do_calc(self):
         for i in range(self.i_max):
+            print("iteration", i)
             self.expected_points = self.propagate(self.t_eval, self.X_i)
 
             for j in range(self.K - 1):
                 self.z_exp[j] = self.transform_state(self.expected_points[j], self.observer[j])
 
             # Find STM (phi) and measurement Jacobian (U)
-            phi = self.compute_stm()
+            phi, psi = self.compute_stt()
+
             U = []
+            Q = []
 
             for k in range(self.K):
-                U_k = self.calculate_U(self.target[k], self.observer[k], self.transform_state)
+                U_k, Q_k = self.calculate_U_and_Q(self.target[k], self.observer[k], self.transform_state)
                 U.append(U_k)
+                Q.append(Q_k)
 
             U = np.array(U)
+            Q = np.array(Q)
 
             # Determine total sensitivity matrix at each measurement time
             Omega = np.zeros((self.K, self.MEASUREMENT_DIM, self.PARAM_DIM))
+            Sigma = np.zeros((self.K, self.MEASUREMENT_DIM, self.STATE_DIM, self.PARAM_DIM))
             for j in range(self.K):
                 Omega[j, :] = U[j, :] @ phi[j, :]
+                Sigma[j, :] = np.einsum('ij,jpl->ipl', U[j, :], psi[j, :, :]) + np.einsum('ijk,jp,kl->ipl', Q[j, :, :], phi[j, :], phi[j, :])
 
             # Find difference in recorded and propagated azimuth/range measurements
             delta_z = (self.z_tau - self.z_exp).reshape((self.K * self.MEASUREMENT_DIM))
-            Omega = Omega.reshape(self.K * self.MEASUREMENT_DIM, self.PARAM_DIM)
-
+            
             # Calculate weight matrix and normalise
             W = np.zeros((self.K * self.MEASUREMENT_DIM, self.K * self.MEASUREMENT_DIM))
             for j in range(self.K - 1):
-                W[j * 2:j * 2 + 2, j * 2:j * 2 + 2] = np.linalg.pinv(Omega[j, :] @ self.P_i @ Omega[j, :].T + self.R_meas)
+                m = 0.5 * np.einsum('iab,ab->i', Sigma[j, :, :], self.P_i)
+
+                term1 = np.einsum('jpq,ab,pq->jab', Sigma[j, :, :], self.P_i, self.P_i)
+                term2 = np.einsum('jpq,ap,bq->jab', Sigma[j, :, :], self.P_i, self.P_i)
+                term3 = np.einsum('jpq,aq,bp->jab', Sigma[j, :, :], self.P_i, self.P_i)
+                P_global = np.einsum('ia, jq, aq -> ij', Omega[j, :], Omega[j, :], self.P_i) - np.outer(m, m) + 0.25 * np.einsum('iab,jab->ij', (term1 + term2 + term3), Sigma[j, :, :])
+
+                W[j * 2:j * 2 + 2, j * 2:j * 2 + 2] = P_global + self.R_meas
             
             W = W / np.linalg.norm(W)
 
+            Omega = Omega.reshape(self.K * self.MEASUREMENT_DIM, self.PARAM_DIM)
+            Sigma = Sigma.reshape(self.K * self.MEASUREMENT_DIM, self.STATE_DIM, self.PARAM_DIM)
+            
+            # Update state and covariance
             H = Omega.T @ W @ Omega
             b = Omega.T @ W @ delta_z
             delta_X_linear = np.linalg.pinv(H) @ b
 
-            # Update state and covariance
-            self.X_i = self.X_i + delta_X_linear
+            Gamma_linear = Omega + np.einsum('ikl,l->ik', Sigma, delta_X_linear)
+            dz_linear = -2 * np.einsum('ji,jk,k->i', Gamma_linear, W, delta_z)
+            Omega_linear = -2 * np.einsum('ji,jk,kp->ip', Gamma_linear, W, Omega)
+            Sigma_linear = -2 * np.einsum('ji,jk,kmn->imn', Gamma_linear, W, Sigma)
+            delta_hat = np.linalg.inv(Omega_linear) @ dz_linear - 0.5 * np.linalg.inv(Omega_linear) @ np.einsum('ijk,j,k->i', Sigma_linear, np.linalg.inv(Omega_linear) @ dz_linear, np.linalg.inv(Omega_linear) @ dz_linear)
+                        
+            self.X_i = self.X_i + delta_hat
 
-            P_dx = np.linalg.pinv(Omega.T @ W @ Omega) @ Omega.T @ W @ self.R_2 @ W.T @ Omega @ np.linalg.pinv(Omega.T @ W @ Omega)
+            P_dx = np.linalg.pinv(Gamma_linear.T @ W @ Omega) @ Gamma_linear.T @ W @ self.R_2 @ W.T @ Gamma_linear @ np.linalg.pinv(Omega.T @ W @ Gamma_linear)
             self.P_i = P_dx
 
             # Record the iteration and difference in current estimated X_0 and actual initial guess
             if self.record:
                 self.results.append([i, self.target[0]- self.X_i])
 
+            print(delta_hat)
+            print(np.linalg.norm(delta_hat))
+
             # Convergence check
-            if np.linalg.norm(delta_X_linear) <= self.nu:
+            if np.linalg.norm(delta_hat) <= self.nu:
                 print("Successfully converged!")
 
                 for j in self.results:
                     print(j)
 
-                print(self.z_exp - self.z_tau) # Expected points - calculated points
+                self.record_to_file("converged_second_order", self.z_exp - self.z_tau)
                 break
 
     # Tmp function if feeling deluded and need to look at each propagation visually
@@ -281,3 +341,8 @@ class PropagateSatellite2():
         ax.set_title("Orbital Trajectory with Impulse")
         plt.legend(loc="upper left")
         plt.show()
+
+    def record_to_file(self, filename, data):
+        with open(filename, "w") as file:
+            for line in data:
+                file.write(f"{line}\n")
