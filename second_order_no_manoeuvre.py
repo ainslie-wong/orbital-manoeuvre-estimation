@@ -7,7 +7,7 @@ from poliastro.bodies import Earth
 from poliastro.twobody import Orbit
 import matplotlib.pyplot as plt
 
-class PropagateSatellite3():
+class PropagateSatelliteSecondNoMan():
     # Constants
     mu_e    = 398600.44    # km**3/s**2
     R_e     = 6378.137      # km
@@ -19,7 +19,7 @@ class PropagateSatellite3():
     nu = 1e-3   # Convergence limit
     i_max = 10  # Iteration limit
 
-    P_0 = np.diag([10**2, 10**2, 10**2, 1e-3**2, 1e-3**2, 1e-3**2])
+    P_0 = np.diag([100**2, 100**2, 100**2, 1e-2**2, 1e-2**2, 1e-2**2])#, 5e-3**2, 5e-3**2, 5e-3**2, 50**2])
     sigma_noise = 1e-4 # Noise during simulation point generation
     R_meas = sigma_noise**2 * np.eye(MEASUREMENT_DIM)   # 2 x 2 measurement covariance matrix
 
