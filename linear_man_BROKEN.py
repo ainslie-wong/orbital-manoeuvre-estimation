@@ -204,6 +204,7 @@ class PropagateSatelliteLinearMan():
 
         # Calculate phi for t - t2
         phi_post0 = phi[-1, :, :].copy()
+        phi_post0[3:, 6:9] += np.eye(3)
         phi_post0[:, 9] = f_minus[:6]
 
         y0_post = np.hstack((X_plus, phi_post0.flatten()))
@@ -216,7 +217,7 @@ class PropagateSatelliteLinearMan():
         for point in range(self.K):
             if point > self.X_i[9]/self.time_split:
                 phi[point, :, :6] = np.einsum('ij, jm -> im', phi1[count, :, :6], phi[point, :, :6])
-                phi[point, :, 6:9] = phi1[count, :, 3:6]
+                phi[point, :, 6:9] = phi1[count, :, 6:9]
                 phi[point, :, 9] = phi1[count, :, 9] * B[:6]
 
                 count +=  1

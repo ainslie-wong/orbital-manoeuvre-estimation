@@ -1,4 +1,4 @@
-from STTMethod import PropagateSatellite
+#from STTMethod import PropagateSatellite
 from linear_no_manoeuvre import PropagateSatelliteLinearNoMan
 from second_order_no_manoeuvre import PropagateSatelliteSecondNoMan
 from linear_man_BROKEN import PropagateSatelliteLinearMan
