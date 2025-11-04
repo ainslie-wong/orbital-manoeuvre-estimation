@@ -169,7 +169,18 @@ class PropagateSatelliteLinearMan():
         return np.hstack((dxdt, dphidt.flatten()))
 
 
+    # Eqn. 8, 10,27 and (attempted) 29
     def compute_stm(self):
+        # Get the pre- and post- manoeuvre time evaluation, including the estimated manoeuvre time as pre and post for x plus and minus
+        t_pre = self.t_eval[self.t_eval <= self.X_i[9]]
+        if t_pre[-1] != self.X_i[9]:
+            t_pre = np.hstack((t_pre, self.X_i[9]))
+
+        t_post = [self.X_i[9]]
+        for time in self.t_eval[self.t_eval > self.X_i[9]]:
+            t_post.append(time)
+
+
         phi0 = np.zeros((self.STATE_DIM, self.PARAM_DIM))
         phi0[:, :6] = np.eye(self.STATE_DIM)
 
@@ -179,15 +190,6 @@ class PropagateSatelliteLinearMan():
         sol = solve_ivp(self.combined_dynamics_pre, [0, self.t_eval[-1]], y0_pre, t_eval=self.t_eval, method='RK23')
         phi = sol.y[self.PARAM_DIM:, :-1].T
         phi = phi.reshape((self.K, self.STATE_DIM, self.PARAM_DIM))
-
-        # Calculate phi for t - t2
-        t_pre = self.t_eval[self.t_eval <= self.X_i[9]]
-        if t_pre[-1] != self.X_i[9]:
-            t_pre = np.hstack((t_pre, self.X_i[9]))
-
-        t_post = [self.X_i[9]]
-        for time in self.t_eval[self.t_eval > self.X_i[9]]:
-            t_post.append(time)
 
         # State after impulse
         X_plus = np.hstack((self.propagate_with_impulse(t_pre, self.X_i)[-1], 0, 0, 0, 0))
@@ -200,6 +202,7 @@ class PropagateSatelliteLinearMan():
         f_plus = self.dynamics(self.X_i[9], X_plus[:6])
         B = f_minus - f_plus
 
+        # Calculate phi for t - t2
         phi_post0 = phi[-1, :, :].copy()
         phi_post0[:, 9] = f_minus[:6]
 
@@ -208,7 +211,8 @@ class PropagateSatelliteLinearMan():
         phi1 = sol.y[self.PARAM_DIM:, 1:-1].T
         phi1 = phi1.reshape((len(t_post) - 2, self.STATE_DIM, self.PARAM_DIM))
 
-        count = 0
+        # Compiling the post-manoeuvre matrix in accordance with Eqn. 29
+        count = 0 # Use this count to find the associated post-manoeuvre phi for the associated A_1 matrix
         for point in range(self.K):
             if point > self.X_i[9]/self.time_split:
                 phi[point, :, :6] = np.einsum('ij, jm -> im', phi1[count, :, :6], phi[point, :, :6])
@@ -286,6 +290,7 @@ class PropagateSatelliteLinearMan():
         return np.array(trajectory)
         
 
+    # From Eqn. 32
     def calculate_U(self, x_target, x_observer, measurement_model, epsilon = 1e-4):
         U = np.zeros((self.MEASUREMENT_DIM, self.STATE_DIM))
 
@@ -324,9 +329,10 @@ class PropagateSatelliteLinearMan():
 
             # Find difference in recorded and propagated azimuth/range measurements
             delta_z = (self.z_tau - self.z_exp).reshape((self.K * self.MEASUREMENT_DIM))
-            Omega = Omega.reshape(self.K * self.MEASUREMENT_DIM, self.PARAM_DIM)
+            Omega = Omega.reshape(self.K * self.MEASUREMENT_DIM, self.PARAM_DIM) # Eqn. 36 and 45
 
             # Calculate weight matrix and normalise
+            # Eqn. 38, 39 and 50
             W = np.zeros((self.K * self.MEASUREMENT_DIM, self.K * self.MEASUREMENT_DIM))
             for i in range(self.K - 1):
                 W[i * 2:i * 2 + 2, i * 2:i * 2 + 2] = np.linalg.pinv(Omega[i, :] @ self.P_i @ Omega[i, :].T + self.R_meas)
@@ -335,12 +341,12 @@ class PropagateSatelliteLinearMan():
 
             H = Omega.T @ W @ Omega
             b = Omega.T @ W @ delta_z
-            delta_X_linear = np.linalg.pinv(H) @ b
+            delta_X_linear = np.linalg.pinv(H) @ b # Eqn. 55
 
             # Update state and covariance
             self.X_i = self.X_i + delta_X_linear
 
-            P_dx = np.linalg.pinv(Omega.T @ W @ Omega) @ Omega.T @ W @ self.R_2 @ W.T @ Omega @ np.linalg.pinv(Omega.T @ W @ Omega)
+            P_dx = np.linalg.pinv(Omega.T @ W @ Omega) @ Omega.T @ W @ self.R_2 @ W.T @ Omega @ np.linalg.pinv(Omega.T @ W @ Omega) #Eqn. 66
             self.P_i = P_dx
 
             # Record the iteration and difference in current estimated X_0 and actual initial guess
@@ -348,8 +354,8 @@ class PropagateSatelliteLinearMan():
                 self.results.append([i, delta_X_linear, self.X_0 - self.X_i])
 
             print(delta_X_linear)
-            #print(P_dx)
             print(np.linalg.norm(delta_X_linear))
+
             # Convergence check
             if np.linalg.norm(delta_X_linear) <= self.nu:
                 print("Successfully converged!")
@@ -357,7 +363,7 @@ class PropagateSatelliteLinearMan():
                 for j in self.results:
                     print(j)
 
-                self.record_to_file("converged_man", self.z_exp - self.z_tau)
+                #self.record_to_file("converged_man", self.z_exp - self.z_tau)
 
                 break
 
