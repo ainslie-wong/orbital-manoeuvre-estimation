@@ -3,6 +3,7 @@ from linear_no_manoeuvre import PropagateSatelliteLinearNoMan
 from second_order_no_manoeuvre import PropagateSatelliteSecondNoMan
 from linear_man_BROKEN import PropagateSatelliteLinearMan
 
+
 # RUN THE ALGORITHMS FROM HERE
 #Input format: number of points, time between points, actual dv, t_man actual, initial estimate dv, t_man estimate, record data?
 
@@ -32,11 +33,11 @@ def no_manoeuvre():
 
 # CHANGE THESE TO RUN EACH TEST
 if __name__ == "__main__":
-    # print("Running no manoeuvre...")
-    # no_manoeuvre()
+    print("Running no manoeuvre...")
+    no_manoeuvre()
     
-    print("Running standard case....")
-    standard_case()
+    # print("Running standard case....")
+    # standard_case()
 
     # print("Running short arc case...")
     # short_arc_case()

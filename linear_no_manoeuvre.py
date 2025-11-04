@@ -16,7 +16,7 @@ class PropagateSatelliteLinearNoMan():
     PARAM_DIM = 6
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
-    nu = 1e-5   # Convergence limit
+    nu = 1e-3   # Convergence limit
     i_max = 10  # Iteration limit
 
     P_0 = np.diag([10**2, 10**2, 10**2, 1e-3**2, 1e-3**2, 1e-3**2])
@@ -163,7 +163,7 @@ class PropagateSatelliteLinearNoMan():
     def compute_stm(self):
         #inside a loop to update X_i with each state in expected_points
         y0 = np.hstack((self.X_i, np.eye(self.STATE_DIM).flatten()))
-        sol = solve_ivp(self.combined_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK45')
+        sol = solve_ivp(self.combined_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK23')
         phi = sol.y[self.STATE_DIM:, :-1].T
         phi = phi.reshape((self.K, self.STATE_DIM, self.PARAM_DIM))
 

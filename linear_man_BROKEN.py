@@ -17,7 +17,7 @@ class PropagateSatelliteLinearMan():
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
     nu = 1e-3   # Convergence limit
-    i_max = 3  # Iteration limit
+    i_max = 10  # Iteration limit
 
     P_0 = np.diag([100**2, 100**2, 100**2, 1e-2**2, 1e-2**2, 1e-2**2, 5e-3**2, 5e-3**2, 5e-3**2, 50**2])
     sigma_noise = 1e-4 # Noise during simulation point generation
@@ -275,7 +275,7 @@ class PropagateSatelliteLinearMan():
                 t_eval=t_post,
                 rtol=1e-8,
                 atol=1e-10,
-                method='DOP853',
+                method='RK23',
                 dense_output=True
             )
         else:

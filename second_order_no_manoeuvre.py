@@ -193,7 +193,7 @@ class PropagateSatelliteSecondNoMan():
 
     def compute_stt(self):
         y0 = np.hstack((self.X_i, np.eye(self.STATE_DIM).flatten(), np.zeros((self.STATE_DIM, self.PARAM_DIM, self.PARAM_DIM)).flatten()))
-        sol = solve_ivp(self.stt_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK45')
+        sol = solve_ivp(self.stt_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK23')
         phi = sol.y[self.STATE_DIM : self.STATE_DIM + self.PARAM_DIM**2, :-1].T
         phi = phi.reshape((self.K, self.STATE_DIM, self.PARAM_DIM))
         
@@ -212,9 +212,9 @@ class PropagateSatelliteSecondNoMan():
             [t_eval[0], t_eval[-1]],
             np.concatenate([r0, v0]),
             t_eval=t_eval,
-            rtol=1e-8,
-            atol=1e-10,
-            method='DOP853',
+            rtol=1e-6,
+            atol=1e-8,
+            method='RK23',
             dense_output=True
         )
 
@@ -249,7 +249,6 @@ class PropagateSatelliteSecondNoMan():
 
     def do_calc(self):
         for i in range(self.i_max):
-            print("iteration", i)
             self.expected_points = self.propagate(self.t_eval, self.X_i)
 
             for j in range(self.K - 1):
