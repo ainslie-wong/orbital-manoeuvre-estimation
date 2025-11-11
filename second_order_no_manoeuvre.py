@@ -315,13 +315,14 @@ class PropagateSatelliteSecondNoMan():
             if self.record:
                 self.results.append([i, self.target[0]- self.X_i])
 
-            print(delta_hat)
-            print(np.linalg.norm(delta_hat))
+            print("delta x:", delta_hat)
+            print("delta x norm (convergence limit):", np.linalg.norm(delta_hat))
 
             # Convergence check
             if np.linalg.norm(delta_hat) <= self.nu:
                 print("Successfully converged!")
 
+                print("Difference in initial state to the iteration's estimated state")
                 for j in self.results:
                     print(j)
 

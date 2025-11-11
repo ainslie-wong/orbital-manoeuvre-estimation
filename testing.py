@@ -8,7 +8,7 @@ from linear_man_BROKEN import PropagateSatelliteLinearMan
 #Input format: number of points, time between points, actual dv, t_man actual, initial estimate dv, t_man estimate, record data?
 
 def standard_case():
-    propagator = PropagateSatelliteLinearMan(180, 10, 3, 3, 3, 910, 1, 2, 3, 960, True)
+    propagator = PropagateSatelliteLinearMan(180, 10, 3, 3, 3, 905, 1, 2, 3, 955, True)
     propagator.do_calc()
 
 def short_arc_case():
@@ -28,16 +28,16 @@ def early_impulse():
     propagator.do_calc()
 
 def no_manoeuvre():
-    propagator = PropagateSatelliteSecondNoMan(1080, 10, True) # Change this to 3 hours each
+    propagator = PropagateSatelliteLinearNoMan(1080, 10, True) # Change this to 3 hours each
     propagator.do_calc()
 
 # CHANGE THESE TO RUN EACH TEST
 if __name__ == "__main__":
-    print("Running no manoeuvre...")
-    no_manoeuvre()
+    # print("Running no manoeuvre...")
+    # no_manoeuvre()
     
-    # print("Running standard case....")
-    # standard_case()
+    print("Running standard case....")
+    standard_case()
 
     # print("Running short arc case...")
     # short_arc_case()

@@ -17,7 +17,7 @@ class PropagateSatelliteLinearNoMan():
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
     nu = 1e-3   # Convergence limit
-    i_max = 10  # Iteration limit
+    i_max = 1  # Iteration limit
 
     P_0 = np.diag([10**2, 10**2, 10**2, 1e-3**2, 1e-3**2, 1e-3**2])
     sigma_noise = 1e-4 # Noise during simulation point generation
@@ -231,9 +231,10 @@ class PropagateSatelliteLinearNoMan():
 
             # Calculate weight matrix and normalise
             W = np.zeros((self.K * self.MEASUREMENT_DIM, self.K * self.MEASUREMENT_DIM))
-            for i in range(self.K - 1):
-                W[i * 2:i * 2 + 2, i * 2:i * 2 + 2] = np.linalg.pinv(Omega[i, :] @ self.P_i @ Omega[i, :].T + self.R_meas)
+            for j in range(self.K - 1):
+                W[j * 2:j * 2 + 2, j * 2:j * 2 + 2] = Omega[j, :] @ self.P_i @ Omega[j, :].T + self.R_meas
             
+            W = np.linalg.pinv(W)
             W = W / np.linalg.norm(W)
 
             H = Omega.T @ W @ Omega
@@ -254,10 +255,11 @@ class PropagateSatelliteLinearNoMan():
             if np.linalg.norm(delta_X_linear) <= self.nu:
                 print("Successfully converged!")
 
+                print("Difference in initial state to the iteration's estimated state")
                 for j in self.results:
                     print(j)
 
-                self.record_to_file("converged", self.z_exp - self.z_tau)
+                #self.record_to_file("converged", self.z_exp - self.z_tau)
 
                 break
 
