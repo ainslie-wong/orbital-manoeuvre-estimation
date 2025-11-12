@@ -17,7 +17,7 @@ class PropagateSatelliteLinearNoMan():
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
     nu = 1e-3   # Convergence limit
-    i_max = 1  # Iteration limit
+    i_max = 10  # Iteration limit
 
     P_0 = np.diag([10**2, 10**2, 10**2, 1e-3**2, 1e-3**2, 1e-3**2])
     sigma_noise = 1e-4 # Noise during simulation point generation
@@ -124,7 +124,7 @@ class PropagateSatelliteLinearNoMan():
     def calc_first_diff(self, x, t):
         epsilon = 1e-4
         r = x[:3]
-        v = x[3:]
+        v = x[3:self.STATE_DIM]
 
         dadr = np.zeros((3, 3))
 
@@ -231,7 +231,7 @@ class PropagateSatelliteLinearNoMan():
 
             # Calculate weight matrix and normalise
             W = np.zeros((self.K * self.MEASUREMENT_DIM, self.K * self.MEASUREMENT_DIM))
-            for j in range(self.K - 1):
+            for j in range(self.K):
                 W[j * 2:j * 2 + 2, j * 2:j * 2 + 2] = Omega[j, :] @ self.P_i @ Omega[j, :].T + self.R_meas
             
             W = np.linalg.pinv(W)

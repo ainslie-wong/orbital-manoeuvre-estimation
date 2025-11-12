@@ -28,7 +28,7 @@ def early_impulse():
     propagator.do_calc()
 
 def no_manoeuvre():
-    propagator = PropagateSatelliteLinearNoMan(1080, 10, True) # Change this to 3 hours each
+    propagator = PropagateSatelliteLinearNoMan(180, 10, True) # Change this to 3 hours each
     propagator.do_calc()
 
 # CHANGE THESE TO RUN EACH TEST

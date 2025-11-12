@@ -17,7 +17,7 @@ class PropagateSatelliteLinearMan():
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
     nu = 1e-3   # Convergence limit
-    i_max = 3  # Iteration limit
+    i_max = 1  # Iteration limit
 
     P_0 = np.diag([100**2, 100**2, 100**2, 1e-2**2, 1e-2**2, 1e-2**2, 5e-3**2, 5e-3**2, 5e-3**2, 50**2])
     sigma_noise = 1e-5 # Noise during simulation point generation
@@ -76,7 +76,7 @@ class PropagateSatelliteLinearMan():
     # J2 dynamics-inclusive dynamics for spacecraft
     def dynamics(self, t, state):
         r = state[:3]
-        v = state[3:]
+        v = state[3:self.STATE_DIM]
 
         # J2 Perturbation
         a_j2r = [self.mu_e * r[0] * self.J2 * self.R_e**2/np.linalg.norm(r)**5 * (-3/2 + 15/2 * r[2]**2/np.linalg.norm(r)**2),
@@ -133,7 +133,7 @@ class PropagateSatelliteLinearMan():
     def calc_first_diff(self, x, t):
         epsilon = 1e-4
         r = x[:3]
-        v = x[3:6]
+        v = x[3:self.STATE_DIM]
 
         dadr = np.zeros((3, 3))
 
@@ -157,17 +157,16 @@ class PropagateSatelliteLinearMan():
         return A
 
     # used to solve for phi when integrating
-    #TODO: This bit is broken for 1 x 10 matrix, forced to 1 x 6 matrix atm but does not propagate t_man
     def combined_dynamics_pre(self, t, y):
         x = y[:self.STATE_DIM]
         phi_flat = y[self.STATE_DIM:]
-        phi = phi_flat.reshape((self.STATE_DIM, self.STATE_DIM))
+        phi = phi_flat.reshape((self.STATE_DIM, self.PARAM_DIM))
 
         dxdt = self.dynamics(t, x)
         A = self.calc_first_diff(x, t)
         dphidt = A @ phi
 
-        return np.hstack((dxdt, dphidt.flatten()))
+        return np.hstack((dxdt , dphidt.flatten()))
  
     # Eqn. 8, 10, 27 and (attempted) 29
     def compute_stm(self):
@@ -183,14 +182,14 @@ class PropagateSatelliteLinearMan():
         t_eval_man = np.concatenate((t_pre[:-1], t_post))   # Generate time points including the estimated parameter to calculate phi at t_man
 
         #Calculate phi for t0 - t2 without a manoeuvre
-        phi0 = np.eye(self.STATE_DIM)
-        y0_pre = np.hstack((self.X_i[:6], phi0.flatten()))
+        phi0 = np.zeros((self.STATE_DIM, self.PARAM_DIM))
+        phi0[:, :self.STATE_DIM] = np.eye(self.STATE_DIM)
 
+        y0_pre = np.hstack((self.X_i[:self.STATE_DIM], phi0.flatten()))
         sol = solve_ivp(self.combined_dynamics_pre, [0, self.t_eval[-1]], y0_pre, t_eval=t_eval_man, method='RK23')
         phi = sol.y[self.STATE_DIM:, :-1].T
-        phi = phi.reshape((self.K + 1, self.STATE_DIM, self.STATE_DIM))
-        phi = np.concatenate((phi, np.zeros((phi.shape[0], phi.shape[1], 4))), axis=2)
-
+        phi = phi.reshape((self.K + 1, self.STATE_DIM, self.PARAM_DIM))
+        print(phi[-1, :, :])
         # State after impulse
         X_plus = self.propagate_with_impulse(t_pre, self.X_i)[-1]
 
@@ -203,17 +202,17 @@ class PropagateSatelliteLinearMan():
         B = f_minus - f_plus
 
         # Calculate phi for t1 - t2
-        # The initial value at t_0 is the last value of the pre-manoeuvre phi
-        phi_post0 = phi[len(t_pre) - 1, :, :6].copy()
-        #phi_post0[:, 9] = f_minus[:6] TODO: This needs to be uncommented when 1 x 10 works
+        # The initial value at t_1 is the last value of the pre-manoeuvre phi
+        #TODO: Not convinced this is the actual initial condition
+        phi_post0 = phi[len(t_pre) - 1, :, :].copy()
+        phi_post0[3:, self.STATE_DIM:9] += np.eye(3)
+        phi_post0[:, 9] += np.hstack((0, 0, 0, f_plus[3:]))
 
         # Solve phi post-manoeuvre
         y0_post = np.hstack((X_plus, phi_post0.flatten()))
         sol = solve_ivp(self.combined_dynamics_pre, [t_post[0], t_post[-1]], y0_post, t_eval=t_post, method='RK23')
         phi1 = sol.y[self.STATE_DIM:, 1:-1].T
-        phi9 = sol.y[:self.STATE_DIM, 1:-1].T   # This is incorect, the last column is not d/dt, it is d/dt_man but this was the workaround for not having the comined_dynamics explode
-
-        phi1 = phi1.reshape((len(t_post) - 2, self.STATE_DIM, self.STATE_DIM))
+        phi1 = phi1.reshape((len(t_post) - 2, self.STATE_DIM, self.PARAM_DIM))
 
         # Compiling the post-manoeuvre matrix in accordance with Eqn. 29
         count = 0 # Use this count to find the associated post-manoeuvre phi for the associated A_1 matrix
@@ -221,7 +220,7 @@ class PropagateSatelliteLinearMan():
             if point > len(t_pre):
                 phi[point, :, :6] = np.einsum('ij, jm -> im', phi1[count, :, :6], phi[point, :, :6])
                 phi[point, :, 6:9] = phi1[count, :, 3:6]
-                phi[point, :, 9] = phi9[count, :] * B
+                phi[point, :, 9] = phi1[count, :, 9] * B
 
                 count +=  1
 
@@ -338,7 +337,7 @@ class PropagateSatelliteLinearMan():
             # Calculate weight matrix and normalise
             # Eqn. 38, 39 and 50
             W = np.zeros((self.K * self.MEASUREMENT_DIM, self.K * self.MEASUREMENT_DIM))
-            for j in range(self.K - 1):
+            for j in range(self.K):
                 W[j * 2:j * 2 + 2, j * 2:j * 2 + 2] = Omega[j, :] @ self.P_i @ Omega[j, :].T + self.R_meas
             
             W = np.linalg.pinv(W)
@@ -369,16 +368,16 @@ class PropagateSatelliteLinearMan():
                 for j in self.results:
                     print(j)
 
-                #self.record_to_file("converged_man", self.z_exp - self.z_tau)
-
                 break
 
+        #self.record_to_file("converged_man", self.z_exp - self.z_tau)
         print("Estimated State:", self.X_i)
+        print("Original State:", self.X_0)
 
     # Tmp function if feeling deluded and need to look at each propagation visually
     def plotting(self):
         initial_guess = self.propagate_with_impulse(self.t_eval, self.X_0)
-
+        self.expected_points = self.propagate_with_impulse(self.t_eval, self.X_i)
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         ax.plot(self.target[:, 0], self.target[:, 1], self.target[:, 2], color="red", label="Actual Orbit")

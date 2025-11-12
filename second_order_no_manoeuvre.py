@@ -280,7 +280,7 @@ class PropagateSatelliteSecondNoMan():
             
             # Calculate weight matrix and normalise
             W = np.zeros((self.K * self.MEASUREMENT_DIM, self.K * self.MEASUREMENT_DIM))
-            for j in range(self.K - 1):
+            for j in range(self.K):
                 m = 0.5 * np.einsum('iab,ab->i', Sigma[j, :, :], self.P_i)
 
                 term1 = np.einsum('jpq,ab,pq->jab', Sigma[j, :, :], self.P_i, self.P_i)
