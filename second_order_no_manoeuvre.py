@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.interpolate import interp1d
 from astropy import units as u
 from astropy.time import Time
 from poliastro.bodies import Earth
@@ -26,14 +25,17 @@ class PropagateSatelliteSecondNoMan():
     results = []
 
     def __init__(self, num_measurement, time_split, record = False):
+        self.results = []
+        self.special_rec = []
         self.record = record
+        self.time_split = time_split
 
-        self.K = num_measurement
+        self.K = num_measurement + 1
         self.t_eval = np.arange(0, (num_measurement + 1)* time_split, time_split)
 
         self.observer = self.generate_input_points(500, 0.01, 45.05, 29.93, 132.9, -107.74, 1e-5, self.t_eval)
         self.target = self.generate_input_points(1000, 0.02, 45, 94.80, 199.00, -54.13, 1e-5, self.t_eval)
-        self.X_0 = np.array(self.target[0] + [10, 10, 10, 5e-3, 5e-3, 5e-3])
+        self.X_0 = np.array(self.target[0] + [10, 10, 10, 1e-3, 1e-3, 1e-3])
         print("I have generated the observer and target points")
 
         self.X_i = self.X_0
@@ -42,8 +44,17 @@ class PropagateSatelliteSecondNoMan():
         self.z_tau = np.zeros((self.K, 2))
         self.z_exp = np.zeros((self.K, 2))
 
-        for i in range(self.K - 1):
+        for i in range(self.K):
             self.z_tau[i] = self.transform_state(self.target[i], self.observer[i])
+
+        
+        if self.record:
+            difference = self.X_i #- self.target[0]
+            to_submit = [0]
+            for k in difference:
+                to_submit.append(k)
+            self.results.append(to_submit)
+
 
         print("I have generated the expected points")
 
@@ -102,7 +113,7 @@ class PropagateSatelliteSecondNoMan():
         velocities = []
 
         for t in t_eval:
-            orbit = orbit.propagate(10 * u.s)
+            orbit = orbit.propagate(self.time_split * u.s)
             r = orbit.r.to_value(u.km)
             v = orbit.v.to_value(u.km / u.s)
 
@@ -116,7 +127,7 @@ class PropagateSatelliteSecondNoMan():
         positions = np.array(positions)
         velocities = np.array(velocities)
         states = np.hstack((positions, velocities))
-        return states[:-1]
+        return states
 
     #y_ref first differential
     def calc_first_diff(self, x):
@@ -194,10 +205,10 @@ class PropagateSatelliteSecondNoMan():
     def compute_stt(self):
         y0 = np.hstack((self.X_i, np.eye(self.STATE_DIM).flatten(), np.zeros((self.STATE_DIM, self.PARAM_DIM, self.PARAM_DIM)).flatten()))
         sol = solve_ivp(self.stt_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK23')
-        phi = sol.y[self.STATE_DIM : self.STATE_DIM + self.PARAM_DIM**2, :-1].T
+        phi = sol.y[self.STATE_DIM : self.STATE_DIM + self.PARAM_DIM**2, :].T
         phi = phi.reshape((self.K, self.STATE_DIM, self.PARAM_DIM))
         
-        psi = sol.y[self.STATE_DIM + self.PARAM_DIM**2:, :-1].T
+        psi = sol.y[self.STATE_DIM + self.PARAM_DIM**2:, :].T
         psi = psi.reshape((self.K, self.STATE_DIM, self.PARAM_DIM, self.PARAM_DIM))
         return phi, psi
 
@@ -250,8 +261,9 @@ class PropagateSatelliteSecondNoMan():
     def do_calc(self):
         for i in range(self.i_max):
             self.expected_points = self.propagate(self.t_eval, self.X_i)
+            self.special_rec.append(self.expected_points[-1, :])
 
-            for j in range(self.K - 1):
+            for j in range(self.K):
                 self.z_exp[j] = self.transform_state(self.expected_points[j], self.observer[j])
 
             # Find STM (phi) and measurement Jacobian (U)
@@ -313,7 +325,12 @@ class PropagateSatelliteSecondNoMan():
 
             # Record the iteration and difference in current estimated X_0 and actual initial guess
             if self.record:
-                self.results.append([i, self.target[0]- self.X_i])
+                difference = self.X_i #- self.target[0]
+                to_submit = [i + 1]
+                for k in difference:
+                    to_submit.append(k)
+                self.results.append(to_submit)
+
 
             print("delta x:", delta_hat)
             print("delta x norm (convergence limit):", np.linalg.norm(delta_hat))
@@ -324,9 +341,37 @@ class PropagateSatelliteSecondNoMan():
 
                 print("Difference in initial state to the iteration's estimated state")
                 for j in self.results:
-                    print(j)
+                    points = self.propagate(self.t_eval, j[1:])
+                    plt.plot(self.t_eval, self.angular_error(points), label=f"Iteration {j[0]}")
 
-                self.record_to_file("converged_second_order", self.z_exp - self.z_tau)
+                self.expected_points = self.propagate(self.t_eval, self.X_i)
+                self.special_rec.append(self.expected_points[-1, :])
+
+                data = np.array([self.target[-1, :3] - l[:3] for l in self.special_rec])
+
+                self.plot_expected_errors(data, np.array([m for m in range(i + 2)]), "Final State", "Final State Error (km)")
+
+                for j in range(self.K):
+                    self.z_exp[j] = self.transform_state(self.expected_points[j], self.observer[j])
+
+                percent = np.where(np.abs((self.z_tau - self.z_exp) * 100/(self.z_tau)) > 1, 1, (self.z_tau - self.z_exp)* 100/(self.z_tau))
+                self.plot_expected_errors(percent, self.t_eval, "Percent", "Percentage Error (%)")
+                self.plot_expected_errors(self.z_tau - self.z_exp, self.t_eval, "Absolute", "Absolute Error (radians)")
+
+                percent_unshrunk = (self.z_tau - self.z_exp) * 100/(self.z_tau)
+                self.plot_expected_errors(percent_unshrunk, self.t_eval, "Percent", "Percentage Error (%)")
+
+                for i in range(len(percent)):
+                    if percent[i, 0] > 5 or percent[i, 1] > 5:
+                        print(percent[i], self.z_tau[i], self.z_exp[i])
+
+
+                # plt.plot(self.t_eval, theta)
+                plt.xlabel("Time (s)")
+                plt.ylabel("LOS Angular Error (radians)")
+                plt.title(f"LOS Angular Error in Second Order Estimation")
+                plt.legend()
+                plt.grid(True); plt.show()
                 break
 
     # Tmp function if feeling deluded and need to look at each propagation visually
@@ -342,7 +387,36 @@ class PropagateSatelliteSecondNoMan():
         plt.legend(loc="upper left")
         plt.show()
 
-    def record_to_file(self, filename, data):
-        with open(filename, "w") as file:
-            for line in data:
-                file.write(f"{line}\n")
+    def plot_expected_errors(self, errors, t_eval, error_type, y_axis):
+        errors = np.asarray(errors)
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(t_eval, errors[:, 0], label="X Error", color="tab:blue")
+        plt.plot(t_eval, errors[:, 1], label="Y Error", color="tab:orange")
+        plt.plot(t_eval, errors[:, 2], label="Z Error", color="tab:green")
+
+        plt.axhline(0, color="k", linestyle="--", linewidth=0.8)
+        plt.xlabel("Iteration Number" if t_eval is not None else "Index")
+        plt.ylabel(y_axis)
+        plt.title(f"{error_type} Error in Second Order Estimation")
+        plt.legend()
+        plt.grid(True, linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        plt.show()
+
+
+    def los_unit(self, r_obs, r_tgt):
+        rel = r_tgt - r_obs
+        return rel / np.linalg.norm(rel)
+    
+    def angular_error(self, points):
+        theta = np.zeros(self.K)
+
+        for k in range(self.K):
+            u_true = self.los_unit(self.observer[k, :3], self.target[k, :3])
+            u_est  = self.los_unit(self.observer[k, :3],  points[k, :3])
+            cross = np.linalg.norm(np.cross(u_est, u_true))
+            dot   = np.clip(np.dot(u_est, u_true), -1.0, 1.0)
+            theta[k] = np.arctan2(cross, dot)
+
+        return theta

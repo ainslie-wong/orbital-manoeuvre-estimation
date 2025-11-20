@@ -17,7 +17,7 @@ class PropagateSatelliteLinearMan():
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
     nu = 1e-3   # Convergence limit
-    i_max = 1  # Iteration limit
+    i_max = 10  # Iteration limit
 
     P_0 = np.diag([100**2, 100**2, 100**2, 1e-2**2, 1e-2**2, 1e-2**2, 5e-3**2, 5e-3**2, 5e-3**2, 50**2])
     sigma_noise = 1e-5 # Noise during simulation point generation
@@ -189,7 +189,7 @@ class PropagateSatelliteLinearMan():
         sol = solve_ivp(self.combined_dynamics_pre, [0, self.t_eval[-1]], y0_pre, t_eval=t_eval_man, method='RK23')
         phi = sol.y[self.STATE_DIM:, :-1].T
         phi = phi.reshape((self.K + 1, self.STATE_DIM, self.PARAM_DIM))
-        print(phi[-1, :, :])
+
         # State after impulse
         X_plus = self.propagate_with_impulse(t_pre, self.X_i)[-1]
 
@@ -203,10 +203,9 @@ class PropagateSatelliteLinearMan():
 
         # Calculate phi for t1 - t2
         # The initial value at t_1 is the last value of the pre-manoeuvre phi
-        #TODO: Not convinced this is the actual initial condition
         phi_post0 = phi[len(t_pre) - 1, :, :].copy()
         phi_post0[3:, self.STATE_DIM:9] += np.eye(3)
-        phi_post0[:, 9] += np.hstack((0, 0, 0, f_plus[3:]))
+        phi_post0[:, 9] += f_minus
 
         # Solve phi post-manoeuvre
         y0_post = np.hstack((X_plus, phi_post0.flatten()))
@@ -219,7 +218,7 @@ class PropagateSatelliteLinearMan():
         for point in range(self.K + 1):
             if point > len(t_pre):
                 phi[point, :, :6] = np.einsum('ij, jm -> im', phi1[count, :, :6], phi[point, :, :6])
-                phi[point, :, 6:9] = phi1[count, :, 3:6]
+                phi[point, :, 6:9] = phi1[count, :, 6:9]
                 phi[point, :, 9] = phi1[count, :, 9] * B
 
                 count +=  1
@@ -345,7 +344,7 @@ class PropagateSatelliteLinearMan():
 
             H = Omega.T @ W @ Omega
             b = Omega.T @ W @ delta_z
-            delta_X_linear = np.linalg.pinv(H) @ b # Eqn. 55
+            delta_X_linear = np.linalg.solve(H+ 1e-8*np.eye(H.shape[0]), b) # Eqn. 55
 
             # Update state and covariance
             self.X_i = self.X_i + delta_X_linear
@@ -373,6 +372,7 @@ class PropagateSatelliteLinearMan():
         #self.record_to_file("converged_man", self.z_exp - self.z_tau)
         print("Estimated State:", self.X_i)
         print("Original State:", self.X_0)
+        self.plotting()
 
     # Tmp function if feeling deluded and need to look at each propagation visually
     def plotting(self):

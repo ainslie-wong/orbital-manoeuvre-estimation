@@ -7,58 +7,46 @@ from poliastro.bodies import Earth
 from poliastro.twobody import Orbit
 import matplotlib.pyplot as plt
 
-class PropagateSatelliteLinearNoMan():
+class PropagateSatelliteLinearMan():
     # Constants
     mu_e    = 398600.44    # km**3/s**2
     R_e     = 6378.137      # km
     J2      = 1.08264e-3
 
-    PARAM_DIM = 6
+    PARAM_DIM = 10
     STATE_DIM = 6
     MEASUREMENT_DIM = 2
     nu = 1e-3   # Convergence limit
-    i_max = 10  # Iteration limit
+    i_max = 1  # Iteration limit
 
-    P_0 = np.diag([100**2, 100**2, 100**2, 1e-2**2, 1e-2**2, 1e-2**2])
+    P_0 = np.diag([100**2, 100**2, 100**2, 1e-3**2, 1e-3**2, 1e-3**2, 5e-3**2, 5e-3**2, 5e-3**2, 10**2])
     sigma_noise = 1e-4 # Noise during simulation point generation
     R_meas = sigma_noise**2 * np.eye(MEASUREMENT_DIM)   # 2 x 2 measurement covariance matrix
 
     results = []
-    special_rec = []
 
-    def __init__(self, num_measurement, time_split, record = False):
+    def __init__(self, num_measurement, time_split, x_dv, y_dv, z_dv, t_dv, xi_dv, yi_dv, zi_dv, ti_dv, record = False):
         self.record = record
         self.time_split = time_split
-        self.special_rec = []
-        self.results = []
 
-        self.K = num_measurement + 1
+        self.K = num_measurement
         self.t_eval = np.arange(0, (num_measurement + 1)* time_split, time_split)
 
-        self.observer = self.generate_input_points(500, 0.01, 45.05, 29.93, 132.9, -107.74, 1e-5, self.t_eval)
-        self.target = self.generate_input_points(1000, 0.02, 45, 94.80, 199.00, -54.13, 1e-5, self.t_eval)
-
-        self.X_0 = np.array(self.target[0] + [10, 10, 10, 1e-3, 1e-3, 1e-3])
+        self.observer = self.generate_input_points(500, 0.01, 45.05, 29.93, 132.9, -107.74, 1e-5, 0, 0, 0, 0, self.t_eval)
+        self.target = self.generate_input_points(1000, 0.02, 45, 94.80, 199.00, -54.13, 1e-5, x_dv, y_dv, z_dv, t_dv, self.t_eval)
+        self.X_0 = np.hstack((self.target[0] + [10, 10, 10, 5e-3, 5e-3, 5e-3], np.array([xi_dv/1000, yi_dv/1000, zi_dv/1000, ti_dv])))
         print("I have generated the observer and target points")
 
         self.X_i = self.X_0
         self.P_i = self.P_0
 
-        self.z_tau = np.zeros((self.K, self.MEASUREMENT_DIM))
-        self.z_exp = np.zeros((self.K, self.MEASUREMENT_DIM))
-
+        self.z_tau = np.zeros((self.K, 2))
+        self.z_exp = np.zeros((self.K, 2))
 
         for i in range(self.K):
             self.z_tau[i] = self.transform_state(self.target[i], self.observer[i])
 
         print("I have generated the expected points")
-
-        if self.record:
-            difference = self.X_i #- self.target[0]
-            to_submit = [0]
-            for k in difference:
-                to_submit.append(k)
-            self.results.append(to_submit)
 
         # Covariance matrix
         self.R_2 = self.sigma_noise**2 * np.eye(self.K * self.MEASUREMENT_DIM)
@@ -79,14 +67,14 @@ class PropagateSatelliteLinearNoMan():
 
         x, y, z = rel_local
         azimuth = np.arctan2(y, x)
-        elevation = np.arcsin(np.clip(z / np.linalg.norm(rel_local), -1.0, 1.0))
+        elevation = np.arcsin(z / np.linalg.norm(rel_local))
 
         return np.array([azimuth, elevation])
 
     # J2 dynamics-inclusive dynamics for spacecraft
     def dynamics(self, t, state):
         r = state[:3]
-        v = state[3:]
+        v = state[3:self.STATE_DIM]
 
         # J2 Perturbation
         a_j2r = [self.mu_e * r[0] * self.J2 * self.R_e**2/np.linalg.norm(r)**5 * (-3/2 + 15/2 * r[2]**2/np.linalg.norm(r)**2),
@@ -99,8 +87,7 @@ class PropagateSatelliteLinearNoMan():
         return np.concatenate([v, a])
 
     # Generates the simulated satellite state vectors at each measurement time using orbital elements (from poliastro library)
-    def generate_input_points(self, a, e, i, raan, argp, nu, noise, t_eval):
-        # Sample orbit test
+    def generate_input_points(self, a, e, i, raan, argp, nu, noise, dvx, dvy, dvz, man_time, t_eval):
         epoch = Time("2025-01-01 00:00:00", scale="utc")
         a = (a + self.R_e) * u.km
         e *= u.one
@@ -108,14 +95,22 @@ class PropagateSatelliteLinearNoMan():
         raan *= u.deg
         argp *= u.deg
         nu *= u.deg
+        dv = [dvx/1000, dvy/1000, dvz/1000] * u.km / u.s
 
         orbit = Orbit.from_classical(Earth, a, e, i, raan, argp, nu, epoch)
 
         positions = []
         velocities = []
+        man_applied = False
 
         for t in t_eval:
             orbit = orbit.propagate(self.time_split * u.s)
+            if t >= man_time and not man_applied:
+                # Apply impulse
+                new_velocity = orbit.v + dv
+                orbit = Orbit.from_vectors(Earth, orbit.r, new_velocity, epoch + t * u.s)
+                man_applied = True
+
             r = orbit.r.to_value(u.km)
             v = orbit.v.to_value(u.km / u.s)
 
@@ -133,9 +128,9 @@ class PropagateSatelliteLinearNoMan():
 
     #y_ref first differential
     def calc_first_diff(self, x, t):
-        epsilon = 1e-4
         r = x[:3]
         v = x[3:self.STATE_DIM]
+        epsilon = 1e-6 * max(1.0, np.linalg.norm(r))
 
         dadr = np.zeros((3, 3))
 
@@ -148,7 +143,6 @@ class PropagateSatelliteLinearNoMan():
 
             a_plus = self.dynamics(0, state_plus)[3:]
             a_minus = self.dynamics(0, state_minus)[3:]
-
             dadr[:, i] = (a_plus - a_minus) / (2 * epsilon)
 
         A = np.block([
@@ -162,7 +156,7 @@ class PropagateSatelliteLinearNoMan():
     def combined_dynamics(self, t, y):
         x = y[:self.STATE_DIM]
         phi_flat = y[self.STATE_DIM:]
-        phi = phi_flat.reshape((self.STATE_DIM, self.STATE_DIM))
+        phi = phi_flat.reshape((self.STATE_DIM, self.PARAM_DIM))
 
         dxdt = self.dynamics(t, x)
         A = self.calc_first_diff(x, t)
@@ -172,11 +166,14 @@ class PropagateSatelliteLinearNoMan():
 
 
     def compute_stm(self):
+        phi0 = np.zeros((self.STATE_DIM, self.PARAM_DIM))
+        phi0[:, :self.STATE_DIM] = np.eye(self.STATE_DIM)
+        phi0 = np.hstack((np.eye(6), np.zeros((6, 4)))).reshape(-1)
         #inside a loop to update X_i with each state in expected_points
-        y0 = np.hstack((self.X_i, np.eye(self.STATE_DIM).flatten()))
+        y0 = np.hstack((self.X_i[:self.STATE_DIM], phi0))
         sol = solve_ivp(self.combined_dynamics, [0, self.t_eval[-1]], y0, t_eval=self.t_eval, method='RK23')
-        phi = sol.y[self.STATE_DIM:].T
-        phi = phi.reshape((self.K, self.STATE_DIM, self.PARAM_DIM))
+        phi = sol.y[self.STATE_DIM:, :].T
+        phi = phi.reshape((len(self.t_eval), self.STATE_DIM, self.PARAM_DIM))
 
         return phi
 
@@ -218,7 +215,7 @@ class PropagateSatelliteLinearNoMan():
         for i in range(self.i_max):
             self.expected_points = self.propagate(self.t_eval, self.X_i)
 
-            for j in range(self.K):
+            for j in range(self.K - 1):
                 self.z_exp[j] = self.transform_state(self.expected_points[j], self.observer[j])
 
             # Find STM (phi) and measurement Jacobian (U)
@@ -238,20 +235,18 @@ class PropagateSatelliteLinearNoMan():
 
             # Find difference in recorded and propagated azimuth/range measurements
             delta_z = (self.z_tau - self.z_exp).reshape((self.K * self.MEASUREMENT_DIM))
-
+            Omega = Omega.reshape(self.K * self.MEASUREMENT_DIM, self.PARAM_DIM)
+            
             # Calculate weight matrix and normalise
             W = np.zeros((self.K * self.MEASUREMENT_DIM, self.K * self.MEASUREMENT_DIM))
             for j in range(self.K):
+                W[j * 2:j * 2 + 2, j * 2:j * 2 + 2] = np.linalg.pinv(Omega[j, :] @ self.P_i @ Omega[j, :].T + self.R_meas)
 
-                W[j * self.MEASUREMENT_DIM:j * self.MEASUREMENT_DIM + self.MEASUREMENT_DIM, j * self.MEASUREMENT_DIM:j * self.MEASUREMENT_DIM + self.MEASUREMENT_DIM] = np.einsum('ia, jq, aq -> ij', Omega[j, :, :], Omega[j, :, :], self.P_i) + self.R_meas
-               
-            W = np.linalg.pinv(W)
             W = W / np.linalg.norm(W)
-            Omega = Omega.reshape(self.K * self.MEASUREMENT_DIM, self.PARAM_DIM)
 
             H = Omega.T @ W @ Omega
             b = Omega.T @ W @ delta_z
-            delta_X_linear = np.linalg.inv(H) @ b
+            delta_X_linear = np.linalg.pinv(H) @ b
 
             # Update state and covariance
             self.X_i = self.X_i + delta_X_linear
@@ -259,13 +254,8 @@ class PropagateSatelliteLinearNoMan():
             P_dx = np.linalg.pinv(Omega.T @ W @ Omega) @ Omega.T @ W @ self.R_2 @ W.T @ Omega @ np.linalg.pinv(Omega.T @ W @ Omega)
             self.P_i = P_dx
 
-            # Record the iteration and difference in current estimated X_0 and actual initial guess
-            if self.record:
-                difference = self.X_i #- self.target[0]
-                to_submit = [i + 1]
-                for k in difference:
-                    to_submit.append(k)
-                self.results.append(to_submit)
+            print("delta x:", delta_X_linear, "\n")
+            print("delta x norm (convergence limit):\n", np.linalg.norm(delta_X_linear), "\n")
 
             # Convergence check
             if np.linalg.norm(delta_X_linear) <= self.nu:
@@ -273,56 +263,20 @@ class PropagateSatelliteLinearNoMan():
 
                 print("Difference in initial state to the iteration's estimated state")
                 for j in self.results:
-                    points = self.propagate(self.t_eval, j[1:])
-                    plt.plot(self.t_eval, self.angular_error(points), label=f"Iteration {j[0]}")
+                    print(j)
 
-                self.expected_points = self.propagate(self.t_eval, self.X_i)
-
-                percent = np.where(np.abs((self.target[:, :3] - self.expected_points[:, :3]) * 100/(self.target[:, :3])) > 1, 1, (self.target[:, :3] - self.expected_points[:, :3]) * 100/(self.target[:, :3]))
-                self.plot_expected_errors(percent, self.t_eval, "Percent State", "Percentage Error (%)")
-                self.plot_expected_errors(self.target[:, :3] - self.expected_points[:, :3], self.t_eval, "Absolute State", "Absolute Error (km)")
-
-                percent_unshrunk = (self.target[:, :3] - self.expected_points[:, :3]) * 100/(self.target[:, :3])
-                self.plot_expected_errors(percent_unshrunk, self.t_eval, "Percent State", "Percentage Error (%)")
-                
-
-                #plt.plot(self.t_eval, theta)
-                plt.xlabel("Time (s)")
-                plt.ylabel("LOS Angular Error (radians)")
-                plt.title(f"LOS Angular Error in Linear Estimation")
-                plt.legend()
-                plt.grid(True); plt.show()
                 break
+        print("Estimated State:", self.X_i)
+        print("Original State:", self.X_0)
 
-    def plot_expected_errors(self, errors, t_eval, error_type, y_axis):
-        errors = np.asarray(errors)
-
-        plt.figure(figsize=(10, 5))
-        plt.plot(t_eval, errors[:, 0], label="X Error", color="tab:blue")
-        plt.plot(t_eval, errors[:, 1], label="Y Error", color="tab:orange")
-        plt.plot(t_eval, errors[:, 2], label="Z Error", color="tab:green")
-
-        plt.axhline(0, color="k", linestyle="--", linewidth=0.8)
-        plt.xlabel("Iteration Number" if t_eval is not None else "Index")
-        plt.ylabel(y_axis)
-        plt.title(f"{error_type} Error in Linear Estimation")
-        plt.legend()
-        plt.grid(True, linestyle="--", alpha=0.7)
-        plt.tight_layout()
+    def plotting(self):
+        initial_guess = self.propagate(self.t_eval, self.X_0)
+        self.expected_points = self.propagate(self.t_eval, self.X_i)
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot(self.target[:, 0], self.target[:, 1], self.target[:, 2], color="red", label="Actual Orbit")
+        ax.plot(initial_guess[:, 0], initial_guess[:, 1], initial_guess[:, 2], color="black", label = "Initial Guess")
+        ax.plot(self.expected_points[:, 0], self.expected_points[:, 1], self.expected_points[:, 2], color="blue", label = "Converged Guess")
+        ax.set_title("Orbital Trajectory with Impulse")
+        plt.legend(loc="upper left")
         plt.show()
-
-    def los_unit(self, r_obs, r_tgt):
-        rel = r_tgt - r_obs
-        return rel / np.linalg.norm(rel)
-    
-    def angular_error(self, points):
-        theta = np.zeros(self.K)
-
-        for k in range(self.K):
-            u_true = self.los_unit(self.observer[k, :3], self.target[k, :3])
-            u_est  = self.los_unit(self.observer[k, :3],  points[k, :3])
-            cross = np.linalg.norm(np.cross(u_est, u_true))
-            dot   = np.clip(np.dot(u_est, u_true), -1.0, 1.0)
-            theta[k] = np.arctan2(cross, dot)
-
-        return theta
